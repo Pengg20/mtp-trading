@@ -785,6 +785,7 @@ class SignalSahamScraper:
         csv_path = os.path.join(outdir, f"{symbol}.csv")
         json_path = os.path.join(outdir, f"{symbol}.json")
         final_df = df.copy()
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if update_mode and update_mode.lower() == "append" and os.path.exists(csv_path):
             try:
                 old_df = pd.read_csv(csv_path)
@@ -800,7 +801,7 @@ class SignalSahamScraper:
                         final_df["Date_parsed"] = pd.NaT
                     final_df = final_df.drop_duplicates(subset=["Date"], keep="first")
                     try:
-                        final_df = final_df.sort_values(by=["Date_parsed", "Date"], ascending=True)
+                        final_df = final_df.sort_values(by=["Date_parsed", "Date"], ascending=[False, False])
                     except Exception:
                         pass
                     try:
@@ -811,6 +812,10 @@ class SignalSahamScraper:
                     final_df = final_df.drop_duplicates(keep="first")
             except Exception:
                 pass
+        try:
+            final_df["updated_at"] = now_str
+        except Exception:
+            pass
         final_df.to_csv(csv_path, index=False, encoding="utf-8")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(json.loads(final_df.to_json(orient="records")), f, ensure_ascii=False, indent=2)
@@ -943,6 +948,17 @@ class SignalSahamScraper:
         if not frames:
             return 0, 0
         all_df = pd.concat(frames, ignore_index=True)
+        try:
+            if "Date" in all_df.columns:
+                all_df["Date_parsed"] = pd.to_datetime(all_df["Date"], errors="coerce")
+                all_df = all_df.sort_values(by=["symbol", "Date_parsed", "Date"], ascending=[True, False, False])
+                all_df = all_df.drop(columns=["Date_parsed"])
+        except Exception:
+            pass
+        try:
+            all_df["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            pass
         out_csv = os.path.join(base_dir, "all.csv")
         out_json = os.path.join(base_dir, "all.json")
         all_df.to_csv(out_csv, index=False, encoding="utf-8")

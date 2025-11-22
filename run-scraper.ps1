@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 if (-not $env:SIGNALSAHAM_EMAIL -or -not $env:SIGNALSAHAM_PASSWORD) {
   Write-Host "SIGNALSAHAM_EMAIL/SIGNALSAHAM_PASSWORD not set. Exiting."; exit 1
 }
-if (-not $env:LINKS_FILE) { $env:LINKS_FILE = "d:\var\shm\link-name-stock.txt" }
+if (-not $env:LINKS_FILE) { $env:LINKS_FILE = "d:\var\shm\backend\link-name-stock.txt" }
 
 # Schedule config
 if (-not $env:AUTO_SCHEDULE) { $env:AUTO_SCHEDULE = 'true' }
