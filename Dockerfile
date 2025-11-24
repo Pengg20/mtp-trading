@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    CHROME_PATH=/usr/bin/chromium-browser \
+    CHROME_PATH=/usr/bin/chromium \
     CHROMEDRIVER_PATH=/usr/bin/chromedriver
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -11,7 +11,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-noto-cjk \
     libglib2.0-0 \
     libnss3 \
-    libgconf-2-4 \
     libxss1 \
     libasound2 \
     libatk1.0-0 \
