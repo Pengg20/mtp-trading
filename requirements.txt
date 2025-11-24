@@ -2,7 +2,7 @@ pandas
 requests
 beautifulsoup4
 selenium
-pymongo[srv]
-certifi
 lxml
 webdriver-manager
+SQLAlchemy
+psycopg2-binary

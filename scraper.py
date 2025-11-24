@@ -8,20 +8,17 @@ from urllib.parse import urljoin, urlparse
 from io import StringIO
 from datetime import datetime, timedelta, timezone
 import hashlib
-import certifi
-from pymongo import MongoClient
+from sqlalchemy import create_engine
 
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-# MongoDB connection
-MONGO_URI = os.getenv("MONGO_URI")
-if not MONGO_URI:
-    raise RuntimeError("MONGO_URI environment variable is required")
-MONGO_CLIENT = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
-MONGO_DB_NAME = os.getenv("MONGO_DB_NAME") or "saham_db"
-MONGO_DB = MONGO_CLIENT[MONGO_DB_NAME]
-MONGO_PRICES = MONGO_DB["prices"]
+DATABASE_URL = os.getenv("DATABASE_URL") or ""
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is required")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = "postgresql://" + DATABASE_URL.split("://", 1)[1]
+SQL_ENGINE = create_engine(DATABASE_URL, pool_pre_ping=True)
 LOGIN_POST = "https://mtp.signalsaham.com/index.php"
 FUNDAMENTAL_URL = "https://mtp.signalsaham.com/fundamental.php"
 
@@ -273,17 +270,12 @@ class SignalSahamScraper:
             from selenium.webdriver.common.by import By
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
-            from selenium.webdriver.chrome.options import Options
         except Exception:
             logging.error("Selenium not available")
             return False
-        opts = Options()
-        if self.headless:
-            opts.add_argument("--headless")
-        opts.add_argument("--no-sandbox")
-        opts.add_argument("--disable-gpu")
-        opts.add_argument("--disable-dev-shm-usage")
-        driver = webdriver.Chrome(options=opts)
+        opts = self._chrome_options()
+        svc = self._chrome_service()
+        driver = webdriver.Chrome(service=svc, options=opts) if svc else webdriver.Chrome(options=opts)
         try:
             driver.get(self.login_url)
             wait = WebDriverWait(driver, 20)
@@ -348,16 +340,11 @@ class SignalSahamScraper:
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
             from selenium.webdriver.common.by import By
-            from selenium.webdriver.chrome.options import Options
         except Exception:
             return None
-        opts = Options()
-        if self.headless:
-            opts.add_argument("--headless")
-        opts.add_argument("--no-sandbox")
-        opts.add_argument("--disable-gpu")
-        opts.add_argument("--disable-dev-shm-usage")
-        driver = webdriver.Chrome(options=opts)
+        opts = self._chrome_options()
+        svc = self._chrome_service()
+        driver = webdriver.Chrome(service=svc, options=opts) if svc else webdriver.Chrome(options=opts)
         try:
             driver.get(self.base_url)
             for c in self.session.cookies:
@@ -398,16 +385,11 @@ class SignalSahamScraper:
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
             from selenium.webdriver.common.by import By
-            from selenium.webdriver.chrome.options import Options
         except Exception:
             return None
-        opts = Options()
-        if self.headless:
-            opts.add_argument("--headless")
-        opts.add_argument("--no-sandbox")
-        opts.add_argument("--disable-gpu")
-        opts.add_argument("--disable-dev-shm-usage")
-        driver = webdriver.Chrome(options=opts)
+        opts = self._chrome_options()
+        svc = self._chrome_service()
+        driver = webdriver.Chrome(service=svc, options=opts) if svc else webdriver.Chrome(options=opts)
         try:
             driver.get(self.base_url)
             target = f"https://mtp.signalsaham.com/stock_price.php?s={symbol}"
@@ -668,16 +650,11 @@ class SignalSahamScraper:
             return None
         try:
             from selenium import webdriver
-            from selenium.webdriver.chrome.options import Options
         except Exception:
             return None
-        opts = Options()
-        if self.headless:
-            opts.add_argument("--headless")
-        opts.add_argument("--no-sandbox")
-        opts.add_argument("--disable-gpu")
-        opts.add_argument("--disable-dev-shm-usage")
-        self.driver = webdriver.Chrome(options=opts)
+        opts = self._chrome_options()
+        svc = self._chrome_service()
+        self.driver = webdriver.Chrome(service=svc, options=opts) if svc else webdriver.Chrome(options=opts)
         try:
             self.driver.get(self.base_url)
             for c in self.session.cookies:
@@ -693,6 +670,46 @@ class SignalSahamScraper:
         except Exception:
             pass
         return self.driver
+
+    def _chrome_options(self):
+        try:
+            from selenium.webdriver.chrome.options import Options
+        except Exception:
+            return None
+        o = Options()
+        if self.headless:
+            o.add_argument("--headless")
+        o.add_argument("--no-sandbox")
+        o.add_argument("--disable-gpu")
+        o.add_argument("--disable-dev-shm-usage")
+        p = os.environ.get("CHROME_PATH")
+        if p:
+            try:
+                o.binary_location = p
+            except Exception:
+                pass
+        return o
+
+    def _chrome_service(self):
+        try:
+            from selenium.webdriver.chrome.service import Service
+        except Exception:
+            return None
+        ep = os.environ.get("CHROMEDRIVER_PATH")
+        if ep and os.path.exists(ep):
+            try:
+                return Service(executable_path=ep)
+            except Exception:
+                pass
+        try:
+            from webdriver_manager.chrome import ChromeDriverManager
+            p = ChromeDriverManager().install()
+            return Service(executable_path=p)
+        except Exception:
+            try:
+                return Service()
+            except Exception:
+                return None
 
     def close_driver(self):
         try:
@@ -899,54 +916,50 @@ class SignalSahamScraper:
             return
         final_df = df.copy()
         now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        try:
-            records = json.loads(final_df.to_json(orient="records"))
-        except Exception:
-            records = []
+        # Tentukan kolom tanggal di tingkat DataFrame
         date_col = None
-        try:
-            cols = list(final_df.columns)
+        cols = list(final_df.columns)
+        for c in cols:
+            s = str(c).lower().strip()
+            if s == "date" or "tanggal" in s or s == "tgl":
+                date_col = c
+                break
+        if date_col is None:
+            best = None
+            best_count = 0
             for c in cols:
-                s = str(c).lower().strip()
-                if s == "date" or "tanggal" in s or s == "tgl":
-                    date_col = c
-                    break
-            if date_col is None:
-                best = None
-                best_count = 0
-                for c in cols:
+                cnt = 0
+                try:
+                    sample = list(final_df[c])[:50]
+                    for v in sample:
+                        if self._normalize_date_value(v):
+                            cnt += 1
+                except Exception:
                     cnt = 0
-                    try:
-                        for v in list(final_df[c])[:50]:
-                            if self._normalize_date_value(v):
-                                cnt += 1
-                    except Exception:
-                        cnt = 0
-                    if cnt > best_count:
-                        best_count = cnt
-                        best = c
-                if best_count > 0:
-                    date_col = best
+                if cnt > best_count:
+                    best_count = cnt
+                    best = c
+            if best_count > 0:
+                date_col = best
+        # Jika tetap tidak ditemukan, tidak bisa menulis apa-apa
+        if not date_col:
+            print(f"❌ {symbol} tidak menemukan kolom tanggal")
+            return
+        # Normalisasi dan filter baris dengan tanggal valid
+        try:
+            normalized_dates = final_df[date_col].apply(self._normalize_date_value)
         except Exception:
-            date_col = None
-        inserted = 0
-        for rec in records:
-            try:
-                d_val = None
-                if isinstance(rec, dict):
-                    d_val = rec.get("Date") or rec.get("Tanggal") or rec.get("tgl") or (rec.get(date_col) if date_col else None) or rec.get("col_1")
-                d = self._normalize_date_value(d_val)
-                if not d:
-                    continue
-                rec["symbol"] = symbol
-                rec["scraped_at_utc"] = now_utc
-                rec["Date"] = d
-                MONGO_PRICES.update_one({"symbol": symbol, "Date": d}, {"$set": rec}, upsert=True)
-                inserted += 1
-            except Exception as e:
-                print(f"❌ {symbol} upsert error: {e}")
-                continue
-        print(f"✔ {symbol} → upserted={inserted}")
+            normalized_dates = pd.Series([None] * len(final_df))
+        mask = normalized_dates.notna()
+        cleaned = final_df[mask].copy()
+        cleaned["Date"] = normalized_dates[mask]
+        cleaned["symbol"] = symbol
+        cleaned["scraped_at_utc"] = now_utc
+        try:
+            cleaned.to_sql("stock_data_all", SQL_ENGINE, if_exists="append", index=False, method="multi")
+            print(f"✔ {symbol} → appended {len(cleaned)} records to stock_data_all")
+        except Exception as e:
+            print(f"❌ {symbol} write error: {e}")
 
     def scrape_symbols_from_file(self, file_path: str, limit: Optional[int] = None, skip_existing: bool = False, rate_limit_ms: int = 0, refresh_retry: bool = False, update_mode: str = "snapshot") -> Tuple[int, int]:
         try:
@@ -1071,10 +1084,12 @@ def run_scrape_job() -> Dict[str, int]:
         if not scraper.login_fixed(username, password):
             return {"done": 0, "total": 0}
     try:
-        MONGO_CLIENT.admin.command("ping")
-        print("✔ Mongo connected")
+        conn = SQL_ENGINE.connect()
+        conn.execute("SELECT 1")
+        conn.close()
+        print("✔ Postgres connected")
     except Exception as e:
-        print(f"❌ Mongo connect failed: {e}")
+        print(f"❌ Postgres connect failed: {e}")
         return {"done": 0, "total": 0}
     if not links_file:
         candidates = [os.path.join("backend", "link-name-stock.txt"), "link-name-stock.txt"]
@@ -1123,23 +1138,10 @@ def run_scrape_job() -> Dict[str, int]:
         out = chosen if chosen is not None else pd.DataFrame()
         out["symbol"] = symbol
         try:
-            records = json.loads(out.to_json(orient="records"))
+            out.to_sql("stock_data_all", SQL_ENGINE, if_exists="append", index=False, method="multi")
+            return {"done": len(out), "total": 1}
         except Exception:
-            records = []
-        now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        up = 0
-        for rec in records:
-            d = rec.get("Date") or rec.get("col_1") or ""
-            if not d:
-                continue
-            rec["symbol"] = symbol
-            rec["scraped_at_utc"] = now_utc
-            try:
-                MONGO_PRICES.update_one({"symbol": symbol, "Date": d}, {"$set": rec}, upsert=True)
-                up += 1
-            except Exception:
-                pass
-        return {"done": up, "total": 1}
+            return {"done": 0, "total": 1}
     return {"done": 0, "total": 0}
 
 
