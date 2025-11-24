@@ -8,10 +8,19 @@ from urllib.parse import urljoin, urlparse
 from io import StringIO
 from datetime import datetime, timedelta
 import hashlib
+import certifi
+from pymongo import MongoClient
 
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
+# MongoDB connection
+MONGO_URI = os.getenv("MONGO_URI")
+if not MONGO_URI:
+    raise RuntimeError("MONGO_URI environment variable is required")
+MONGO_CLIENT = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
+MONGO_DB = MONGO_CLIENT["saham_db"]
+MONGO_PRICES = MONGO_DB["prices"]
 LOGIN_POST = "https://mtp.signalsaham.com/index.php"
 FUNDAMENTAL_URL = "https://mtp.signalsaham.com/fundamental.php"
 
@@ -239,9 +248,10 @@ class SignalSahamScraper:
             return False
         opts = Options()
         if self.headless:
-            opts.add_argument("--headless=new")
+            opts.add_argument("--headless")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-gpu")
+        opts.add_argument("--disable-dev-shm-usage")
         driver = webdriver.Chrome(options=opts)
         try:
             driver.get(self.login_url)
@@ -312,9 +322,10 @@ class SignalSahamScraper:
             return None
         opts = Options()
         if self.headless:
-            opts.add_argument("--headless=new")
+            opts.add_argument("--headless")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-gpu")
+        opts.add_argument("--disable-dev-shm-usage")
         driver = webdriver.Chrome(options=opts)
         try:
             driver.get(self.base_url)
@@ -361,9 +372,10 @@ class SignalSahamScraper:
             return None
         opts = Options()
         if self.headless:
-            opts.add_argument("--headless=new")
+            opts.add_argument("--headless")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-gpu")
+        opts.add_argument("--disable-dev-shm-usage")
         driver = webdriver.Chrome(options=opts)
         try:
             driver.get(self.base_url)
@@ -630,9 +642,10 @@ class SignalSahamScraper:
             return None
         opts = Options()
         if self.headless:
-            opts.add_argument("--headless=new")
+            opts.add_argument("--headless")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-gpu")
+        opts.add_argument("--disable-dev-shm-usage")
         self.driver = webdriver.Chrome(options=opts)
         try:
             self.driver.get(self.base_url)
@@ -850,56 +863,28 @@ class SignalSahamScraper:
         return chosen
 
     def _write_symbol_data(self, symbol: str, df: pd.DataFrame, update_mode: str = "snapshot") -> None:
-        outdir = os.path.join("data", "stock_price", symbol)
-        os.makedirs(outdir, exist_ok=True)
-        csv_path = os.path.join(outdir, f"{symbol}.csv")
-        json_path = os.path.join(outdir, f"{symbol}.json")
         if df is None or (hasattr(df, "empty") and df.empty):
             print(f"❌ {symbol} tidak ada data")
             return
         final_df = df.copy()
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if update_mode and update_mode.lower() == "append" and os.path.exists(csv_path):
-            try:
-                old_df = pd.read_csv(csv_path)
-                cols = list(final_df.columns)
-                for c in old_df.columns:
-                    if c not in cols:
-                        cols.append(c)
-                final_df = pd.concat([final_df, old_df], ignore_index=True, sort=False)
-                if "Date" in final_df.columns:
-                    try:
-                        final_df["Date_parsed"] = pd.to_datetime(final_df["Date"], errors="coerce")
-                    except Exception:
-                        final_df["Date_parsed"] = pd.NaT
-                    final_df = final_df.drop_duplicates(subset=["Date"], keep="first")
-                    try:
-                        final_df = final_df.sort_values(by=["Date_parsed", "Date"], ascending=[False, False])
-                    except Exception:
-                        pass
-                    try:
-                        final_df = final_df.drop(columns=["Date_parsed"])
-                    except Exception:
-                        pass
-                else:
-                    final_df = final_df.drop_duplicates(keep="first")
-            except Exception:
-                pass
-        on_change_only = (os.environ.get("ON_CHANGE_ONLY") or "").strip().lower() in ("1", "true", "yes", "y")
-        fp_new = self._compute_fingerprint(final_df)
-        if on_change_only:
-            fp_old = self._load_fingerprint(symbol)
-            if fp_old and fp_old == fp_new:
-                print(f"⏭ {symbol} tidak berubah")
-                return
+        now_utc = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         try:
-            final_df["updated_at"] = now_str
+            records = json.loads(final_df.to_json(orient="records"))
         except Exception:
-            pass
-        final_df.to_csv(csv_path, index=False, encoding="utf-8")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(json.loads(final_df.to_json(orient="records")), f, ensure_ascii=False, indent=2)
-        self._save_fingerprint(symbol, fp_new)
+            records = []
+        inserted = 0
+        for rec in records:
+            try:
+                d = rec.get("Date") or rec.get("col_1") or ""
+                if not d:
+                    continue
+                rec["symbol"] = symbol
+                rec["scraped_at_utc"] = now_utc
+                MONGO_PRICES.update_one({"symbol": symbol, "Date": d}, {"$set": rec}, upsert=True)
+                inserted += 1
+            except Exception:
+                continue
+        print(f"✔ {symbol} → upserted={inserted}")
 
     def scrape_symbols_from_file(self, file_path: str, limit: Optional[int] = None, skip_existing: bool = False, rate_limit_ms: int = 0, refresh_retry: bool = False, update_mode: str = "snapshot") -> Tuple[int, int]:
         try:
@@ -997,64 +982,14 @@ class SignalSahamScraper:
                 print(f"❌ {s} gagal: {e}")
                 continue
         self.close_driver()
-        idx_rows = []
-        for s in symbols:
-            idx_rows.append({"symbol": s, "csv": f"data/stock_price/{s}/{s}.csv", "json": f"data/stock_price/{s}/{s}.json"})
-        pd.DataFrame(idx_rows).to_csv("data/stock_price/index.csv", index=False, encoding="utf-8")
-        with open("data/stock_price/index.json", "w", encoding="utf-8") as f:
-            json.dump(idx_rows, f, ensure_ascii=False, indent=2)
+        # index file output disabled for MongoDB storage
         return done, total
 
-    def aggregate_all(self, base_dir: str = "data/stock_price") -> Tuple[int, int]:
-        dirs = []
-        try:
-            for name in os.listdir(base_dir):
-                p = os.path.join(base_dir, name)
-                if os.path.isdir(p):
-                    dirs.append(name)
-        except Exception:
-            return 0, 0
-        frames = []
-        for s in dirs:
-            p = os.path.join(base_dir, s, f"{s}.csv")
-            if not os.path.exists(p):
-                continue
-            try:
-                df = pd.read_csv(p)
-            except Exception:
-                continue
-            if "symbol" not in df.columns:
-                df["symbol"] = s
-            frames.append(df)
-        if not frames:
-            return 0, 0
-        all_df = pd.concat(frames, ignore_index=True)
-        try:
-            if "Date" in all_df.columns:
-                all_df["Date_parsed"] = pd.to_datetime(all_df["Date"], errors="coerce")
-                all_df = all_df.sort_values(by=["symbol", "Date_parsed", "Date"], ascending=[True, False, False])
-                all_df = all_df.drop(columns=["Date_parsed"])
-        except Exception:
-            pass
-        try:
-            all_df["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        except Exception:
-            pass
-        out_csv = os.path.join(base_dir, "all.csv")
-        out_json = os.path.join(base_dir, "all.json")
-        all_df.to_csv(out_csv, index=False, encoding="utf-8")
-        with open(out_json, "w", encoding="utf-8") as f:
-            json.dump(json.loads(all_df.to_json(orient="records")), f, ensure_ascii=False, indent=2)
-        return len(all_df), all_df["symbol"].nunique()
+    # aggregate_all disabled for MongoDB storage
 
 
 def main():
-    aggregate_env = os.environ.get("AGGREGATE") or ""
-    if str(aggregate_env).strip().lower() in ("1", "true", "yes", "y"):
-        scraper = SignalSahamScraper()
-        rows, syms = scraper.aggregate_all()
-        print(f"✔ Aggregasi selesai: rows={rows}, symbols={syms}")
-        return
+    # aggregation disabled for MongoDB storage
     auto_env = os.environ.get("AUTO_SCHEDULE") or ""
     if str(auto_env).strip().lower() in ("1", "true", "yes", "y"):
         username = os.environ.get("SIGNALSAHAM_EMAIL") or ""
@@ -1117,9 +1052,6 @@ def main():
                 update_mode = (os.environ.get("UPDATE_MODE") or "snapshot").strip().lower()
                 done, total = scr.scrape_symbols_from_file(links_file, limit=None, skip_existing=skip_existing, rate_limit_ms=rate_ms, refresh_retry=refresh_retry, update_mode=update_mode)
                 print(f"✔ Slot selesai: {done}/{total}")
-                if do_agg:
-                    rows, syms = scr.aggregate_all()
-                    print(f"✔ Aggregasi selesai: rows={rows}, symbols={syms}")
             except Exception as e:
                 print(f"❌ Gagal eksekusi slot: {e}")
             try:
@@ -1184,10 +1116,24 @@ def main():
         out = chosen if chosen is not None else pd.DataFrame()
         out["symbol"] = symbol
         print(f"✔ Tabel terdeteksi dengan {len(out)} baris")
-        out.to_csv(f"stock_price_{symbol}.csv", index=False, encoding="utf-8")
-        with open(f"stock_price_{symbol}.json", "w", encoding="utf-8") as f:
-            json.dump(json.loads(out.to_json(orient="records")), f, ensure_ascii=False, indent=2)
-        print(f"✔ Diekspor ke stock_price_{symbol}.csv dan stock_price_{symbol}.json")
+        try:
+            records = json.loads(out.to_json(orient="records"))
+        except Exception:
+            records = []
+        now_utc = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        up = 0
+        for rec in records:
+            d = rec.get("Date") or rec.get("col_1") or ""
+            if not d:
+                continue
+            rec["symbol"] = symbol
+            rec["scraped_at_utc"] = now_utc
+            try:
+                MONGO_PRICES.update_one({"symbol": symbol, "Date": d}, {"$set": rec}, upsert=True)
+                up += 1
+            except Exception:
+                pass
+        print(f"✔ Disimpan ke MongoDB: upserted={up}")
         return
     html = scraper.fetch_fundamental_selenium()
     if not html:
@@ -1195,10 +1141,24 @@ def main():
         return
     df = scraper.parse_fundamental_table(html)
     print(f"✔ Table detected with {len(df)} rows")
-    with open("fundamental.json", "w", encoding="utf-8") as f:
-        json.dump(json.loads(df.to_json(orient="records")), f, ensure_ascii=False, indent=2)
-    df.to_csv("fundamental.csv", index=False, encoding="utf-8")
-    print("✔ Exported to fundamental.csv and fundamental.json")
+    try:
+        rows = json.loads(df.to_json(orient="records"))
+    except Exception:
+        rows = []
+    now_utc = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    up = 0
+    for rec in rows:
+        d = rec.get("Date") or rec.get("col_1") or ""
+        if not d:
+            continue
+        rec["symbol"] = rec.get("symbol") or rec.get("stock_code") or rec.get("stock_name") or ""
+        rec["scraped_at_utc"] = now_utc
+        try:
+            MONGO_PRICES.update_one({"symbol": rec["symbol"], "Date": d}, {"$set": rec}, upsert=True)
+            up += 1
+        except Exception:
+            pass
+    print(f"✔ Fundamental disimpan ke MongoDB: upserted={up}")
 
 
 if __name__ == "__main__":

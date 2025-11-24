@@ -1,0 +1,8 @@
+pandas
+requests
+beautifulsoup4
+selenium
+pymongo[srv]
+certifi
+lxml
+webdriver-manager
