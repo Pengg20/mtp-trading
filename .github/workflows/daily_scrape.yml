@@ -1,0 +1,41 @@
+name: Auto Scraper Saham
+
+on:
+  schedule:
+    # Jadwal WIB dikurangi 7 jam (karena server UTC)
+    - cron: '0 3 * * *'   # 10:00 WIB
+    - cron: '0 5 * * *'   # 12:00 WIB
+    - cron: '0 7 * * *'   # 14:00 WIB
+    - cron: '30 8 * * *'  # 15:30 WIB
+    - cron: '0 10 * * *'  # 17:00 WIB
+  
+  # Tombol Manual biar bisa dites sekarang
+  workflow_dispatch:
+
+jobs:
+  scrape-saham:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Ambil Kode
+        uses: actions/checkout@v3
+
+      - name: Siapkan Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@latest
+
+      - name: Install Library
+        run: pip install -r requirements.txt
+
+      - name: Jalankan Robot
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          SIGNALSAHAM_EMAIL: ${{ secrets.SIGNALSAHAM_EMAIL }}
+          SIGNALSAHAM_PASSWORD: ${{ secrets.SIGNALSAHAM_PASSWORD }}
+          HEADLESS_MODE: 'true'
+        # Karena file scraper.py kamu ada di halaman depan (root)
+        run: python scraper.py
