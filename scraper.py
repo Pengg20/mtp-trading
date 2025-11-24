@@ -998,14 +998,25 @@ def run_scrape_job() -> Dict[str, int]:
     rate_limit_ms_env = os.environ.get("RATE_LIMIT_MS") or "800"
     refresh_retry_env = os.environ.get("REFRESH_RETRY") or "true"
     update_mode = (os.environ.get("UPDATE_MODE") or "append").strip().lower()
+    headless_env = os.environ.get("HEADLESS_MODE") or "true"
+    headless_flag = str(headless_env).strip().lower() in ("1", "true", "yes", "y")
     if not username or not password:
         raise RuntimeError("Provide SIGNALSAHAM_EMAIL and SIGNALSAHAM_PASSWORD environment variables")
-    scraper = SignalSahamScraper(use_selenium=True, headless=True)
+    scraper = SignalSahamScraper(use_selenium=True, headless=headless_flag)
     scraper.cred_email = username
     scraper.cred_password = password
     if not scraper.login(username, password):
         if not scraper.login_fixed(username, password):
             return {"done": 0, "total": 0}
+    if not links_file:
+        candidates = [os.path.join("backend", "link-name-stock.txt"), "link-name-stock.txt"]
+        for cand in candidates:
+            try:
+                if os.path.exists(cand):
+                    links_file = cand
+                    break
+            except Exception:
+                pass
     if links_file:
         try:
             rate_ms = int(rate_limit_ms_env)
@@ -1013,6 +1024,7 @@ def run_scrape_job() -> Dict[str, int]:
             rate_ms = 800
         skip_existing = str(skip_existing_env).strip().lower() in ("1", "true", "yes", "y")
         refresh_retry = str(refresh_retry_env).strip().lower() in ("1", "true", "yes", "y")
+        print(f"Links file: {links_file}")
         done, total = scraper.scrape_symbols_from_file(links_file, limit=(int(links_limit) if links_limit else None), skip_existing=skip_existing, rate_limit_ms=rate_ms, refresh_retry=refresh_retry, update_mode=update_mode)
         return {"done": done, "total": total}
     if symbol:
