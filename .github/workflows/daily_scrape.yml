@@ -1,7 +1,7 @@
 name: Auto Scraper Saham
 
 on:
-  schedule:
+  #schedule:
     # Jadwal WIB dikurangi 7 jam (karena server UTC)
     #- cron: '0 3 * * *'   # 10:00 WIB
     #- cron: '0 5 * * *'   # 12:00 WIB
