@@ -1,7 +1,6 @@
 name: Auto Scraper Saham
 
 on:
-  # Jadwal otomatis (uncomment saat sudah siap)
   # schedule:
   #   - cron: '0 3 * * *'    # 10:00 WIB
   #   - cron: '0 5 * * *'    # 12:00 WIB
@@ -26,21 +25,21 @@ jobs:
         uses: browser-actions/setup-chrome@latest
 
       - name: Install Library
-        run: pip install -r backend/requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Jalankan Robot
         env:
           MONGO_URI: ${{ secrets.MONGO_URI }}
           SIGNALSAHAM_EMAIL: ${{ secrets.SIGNALSAHAM_EMAIL }}
           SIGNALSAHAM_PASSWORD: ${{ secrets.SIGNALSAHAM_PASSWORD }}
-          # Optional: ganti DB jika perlu
-          # MONGO_DB_NAME: saham_db
+          # Opsional jika DB bukan 'saham_db'
+          # MONGO_DB_NAME: your_db_name
 
           HEADLESS_MODE: 'true'
-          LINKS_FILE: backend/link-name-stock.txt
-          LINKS_LIMIT: '5'
-          SKIP_EXISTING: 'false'   # untuk run awal isi DB
+          LINKS_FILE: link-name-stock.txt
+          LINKS_LIMIT: '5'          # ubah ke '1000' untuk batch penuh
+          SKIP_EXISTING: 'false'    # isi DB awal → false; update harian → true
           RATE_LIMIT_MS: '800'
           REFRESH_RETRY: 'true'
           UPDATE_MODE: 'append'
-        run: python backend/scraper.py
+        run: python scraper.py
