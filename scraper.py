@@ -875,30 +875,46 @@ class SignalSahamScraper:
             records = []
         date_col = None
         try:
-            for c in list(final_df.columns):
+            cols = list(final_df.columns)
+            for c in cols:
                 s = str(c).lower().strip()
-                if ("date" in s) or ("tanggal" in s) or ("tgl" in s):
+                if s == "date" or "tanggal" in s or s == "tgl":
                     date_col = c
                     break
             if date_col is None:
-                for c in list(final_df.columns):
+                best = None
+                best_count = 0
+                for c in cols:
                     try:
                         ser = pd.to_datetime(final_df[c], errors="coerce", dayfirst=True)
-                        if int(ser.notna().sum()) > 0:
-                            date_col = c
-                            break
+                        cnt = int(ser.notna().sum())
+                        if cnt > best_count:
+                            best_count = cnt
+                            best = c
                     except Exception:
                         pass
+                if best_count > 0:
+                    date_col = best
         except Exception:
             date_col = None
         inserted = 0
         for rec in records:
             try:
-                d = rec.get("Date") or rec.get("Tanggal") or rec.get("tgl") or rec.get("col_1") or (rec.get(date_col) if date_col else "")
-                if not d:
+                d_val = None
+                if isinstance(rec, dict):
+                    d_val = rec.get("Date") or rec.get("Tanggal") or rec.get("tgl") or (rec.get(date_col) if date_col else None) or rec.get("col_1")
+                if not d_val:
+                    continue
+                try:
+                    dt = pd.to_datetime(d_val, errors="coerce", dayfirst=True)
+                    if pd.isna(dt):
+                        continue
+                    d = dt.strftime("%Y-%m-%d")
+                except Exception:
                     continue
                 rec["symbol"] = symbol
                 rec["scraped_at_utc"] = now_utc
+                rec["Date"] = d
                 MONGO_PRICES.update_one({"symbol": symbol, "Date": d}, {"$set": rec}, upsert=True)
                 inserted += 1
             except Exception as e:
