@@ -40,7 +40,7 @@ jobs:
           
           # KONFIGURASI LINK (DIBUAT TINGGI UNTUK 934 LINK)
           HEADLESS_MODE: 'true'
-          LINKS_LIMIT: '1000'
+          LINKS_LIMIT: '5'
         
         # Karena file scraper.py kamu ada di halaman depan (root)
         run: python scraper.py
