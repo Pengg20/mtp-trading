@@ -1,12 +1,6 @@
 name: Auto Scraper Saham
 
 on:
-  # schedule:
-  #   - cron: '0 3 * * *'    # 10:00 WIB
-  #   - cron: '0 5 * * *'    # 12:00 WIB
-  #   - cron: '0 7 * * *'    # 14:00 WIB
-  #   - cron: '30 8 * * *'   # 15:30 WIB
-  #   - cron: '0 10 * * *'   # 17:00 WIB
   workflow_dispatch:
 
 jobs:
@@ -32,13 +26,10 @@ jobs:
           MONGO_URI: ${{ secrets.MONGO_URI }}
           SIGNALSAHAM_EMAIL: ${{ secrets.SIGNALSAHAM_EMAIL }}
           SIGNALSAHAM_PASSWORD: ${{ secrets.SIGNALSAHAM_PASSWORD }}
-          # Opsional jika DB bukan 'saham_db'
-          # MONGO_DB_NAME: your_db_name
-
           HEADLESS_MODE: 'true'
           LINKS_FILE: link-name-stock.txt
-          LINKS_LIMIT: '5'          # ubah ke '1000' untuk batch penuh
-          SKIP_EXISTING: 'false'    # isi DB awal → false; update harian → true
+          LINKS_LIMIT: '5'
+          SKIP_EXISTING: 'false'
           RATE_LIMIT_MS: '800'
           REFRESH_RETRY: 'true'
           UPDATE_MODE: 'append'
