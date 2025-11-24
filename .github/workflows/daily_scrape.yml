@@ -33,9 +33,14 @@ jobs:
 
       - name: Jalankan Robot
         env:
+          # KUNCI RAHASIA WAJIB
           MONGO_URI: ${{ secrets.MONGO_URI }}
           SIGNALSAHAM_EMAIL: ${{ secrets.SIGNALSAHAM_EMAIL }}
-          SIGNALSAHAM_PASSWORD: ${{ secrets.SIGNALSAHAM_PASSWORD }}
+          SIGNALSAHAM_PASSWORD: ${{ secrets.SIGNALSAHAM_PASSWORD }} 
+          
+          # KONFIGURASI LINK (DIBUAT TINGGI UNTUK 934 LINK)
           HEADLESS_MODE: 'true'
+          LINKS_LIMIT: '1000'
+        
         # Karena file scraper.py kamu ada di halaman depan (root)
         run: python scraper.py
