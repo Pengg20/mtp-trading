@@ -988,77 +988,7 @@ class SignalSahamScraper:
     # aggregate_all disabled for MongoDB storage
 
 
-def main():
-    # aggregation disabled for MongoDB storage
-    auto_env = os.environ.get("AUTO_SCHEDULE") or ""
-    if str(auto_env).strip().lower() in ("1", "true", "yes", "y"):
-        username = os.environ.get("SIGNALSAHAM_EMAIL") or ""
-        password = os.environ.get("SIGNALSAHAM_PASSWORD") or ""
-        links_file = os.environ.get("LINKS_FILE") or ""
-        schedule_times_env = os.environ.get("SCHEDULE_TIMES") or "10:02,12:02,14:02,17:32"
-        skip_existing_env = os.environ.get("SKIP_EXISTING") or "false"
-        rate_limit_ms_env = os.environ.get("RATE_LIMIT_MS") or "800"
-        refresh_retry_env = os.environ.get("REFRESH_RETRY") or "true"
-        aggregate_after_env = os.environ.get("AGGREGATE_AFTER") or "true"
-        timeslots = []
-        for part in schedule_times_env.split(","):
-            part = part.strip()
-            if not part:
-                continue
-            try:
-                hh, mm = part.split(":")
-                timeslots.append((int(hh), int(mm)))
-            except Exception:
-                pass
-        timeslots = [(h, m) for (h, m) in timeslots if 0 <= h < 24 and 0 <= m < 60]
-        if not username or not password or not links_file or not timeslots:
-            print("❌ AUTO_SCHEDULE membutuhkan SIGNALSAHAM_EMAIL, SIGNALSAHAM_PASSWORD, LINKS_FILE, SCHEDULE_TIMES")
-            return
-        skip_existing = str(skip_existing_env).strip().lower() in ("1", "true", "yes", "y")
-        refresh_retry = str(refresh_retry_env).strip().lower() in ("1", "true", "yes", "y")
-        try:
-            rate_ms = int(rate_limit_ms_env)
-        except Exception:
-            rate_ms = 800
-        do_agg = str(aggregate_after_env).strip().lower() in ("1", "true", "yes", "y")
-        while True:
-            now = datetime.now()
-            if now.weekday() >= 5:
-                nxt = (now + timedelta(days=(7 - now.weekday()))).replace(hour=timeslots[0][0], minute=timeslots[0][1], second=0, microsecond=0)
-            else:
-                candidates = []
-                for (h, m) in timeslots:
-                    t = now.replace(hour=h, minute=m, second=0, microsecond=0)
-                    if t <= now:
-                        t = t + timedelta(days=1 if now.weekday() >= 4 and (h, m) <= timeslots[-1] else 0)
-                    candidates.append(t)
-                nxt = min(candidates)
-                if nxt.weekday() >= 5:
-                    nxt = nxt + timedelta(days=(7 - nxt.weekday()))
-            wait_sec = max(1, int((nxt - now).total_seconds()))
-            print(f"⏳ Menunggu hingga {nxt.strftime('%Y-%m-%d %H:%M')} ({wait_sec}s)")
-            try:
-                time.sleep(wait_sec)
-            except Exception:
-                pass
-            scr = SignalSahamScraper(use_selenium=True, headless=True)
-            scr.cred_email = username
-            scr.cred_password = password
-            if not scr.login(username, password):
-                if not scr.login_fixed(username, password):
-                    print("❌ Login gagal, skip slot ini")
-                    continue
-            try:
-                update_mode = (os.environ.get("UPDATE_MODE") or "snapshot").strip().lower()
-                done, total = scr.scrape_symbols_from_file(links_file, limit=None, skip_existing=skip_existing, rate_limit_ms=rate_ms, refresh_retry=refresh_retry, update_mode=update_mode)
-                print(f"✔ Slot selesai: {done}/{total}")
-            except Exception as e:
-                print(f"❌ Gagal eksekusi slot: {e}")
-            try:
-                scr.close_driver()
-            except Exception:
-                pass
-        return
+def run_scrape_job() -> Dict[str, int]:
     username = os.environ.get("SIGNALSAHAM_EMAIL") or ""
     password = os.environ.get("SIGNALSAHAM_PASSWORD") or ""
     symbol = os.environ.get("SIGNALSAHAM_SYMBOL") or ""
@@ -1067,6 +997,7 @@ def main():
     skip_existing_env = os.environ.get("SKIP_EXISTING") or "true"
     rate_limit_ms_env = os.environ.get("RATE_LIMIT_MS") or "800"
     refresh_retry_env = os.environ.get("REFRESH_RETRY") or "true"
+    update_mode = (os.environ.get("UPDATE_MODE") or "append").strip().lower()
     if not username or not password:
         raise RuntimeError("Provide SIGNALSAHAM_EMAIL and SIGNALSAHAM_PASSWORD environment variables")
     scraper = SignalSahamScraper(use_selenium=True, headless=True)
@@ -1074,8 +1005,7 @@ def main():
     scraper.cred_password = password
     if not scraper.login(username, password):
         if not scraper.login_fixed(username, password):
-            print("❌ Login failed")
-            return
+            return {"done": 0, "total": 0}
     if links_file:
         try:
             rate_ms = int(rate_limit_ms_env)
@@ -1083,15 +1013,12 @@ def main():
             rate_ms = 800
         skip_existing = str(skip_existing_env).strip().lower() in ("1", "true", "yes", "y")
         refresh_retry = str(refresh_retry_env).strip().lower() in ("1", "true", "yes", "y")
-        update_mode = (os.environ.get("UPDATE_MODE") or "snapshot").strip().lower()
         done, total = scraper.scrape_symbols_from_file(links_file, limit=(int(links_limit) if links_limit else None), skip_existing=skip_existing, rate_limit_ms=rate_ms, refresh_retry=refresh_retry, update_mode=update_mode)
-        print(f"✔ Batch selesai: {done}/{total}")
-        return
+        return {"done": done, "total": total}
     if symbol:
         html = scraper.fetch_stock_price_selenium(symbol)
         if not html:
-            print("❌ Gagal memuat halaman stock_price")
-            return
+            return {"done": 0, "total": 1}
         dfs = []
         try:
             for df in pd.read_html(StringIO(html)):
@@ -1115,12 +1042,11 @@ def main():
             chosen = max(dfs, key=lambda x: len(x))
         out = chosen if chosen is not None else pd.DataFrame()
         out["symbol"] = symbol
-        print(f"✔ Tabel terdeteksi dengan {len(out)} baris")
         try:
             records = json.loads(out.to_json(orient="records"))
         except Exception:
             records = []
-        now_utc = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now_utc = datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         up = 0
         for rec in records:
             d = rec.get("Date") or rec.get("col_1") or ""
@@ -1133,33 +1059,9 @@ def main():
                 up += 1
             except Exception:
                 pass
-        print(f"✔ Disimpan ke MongoDB: upserted={up}")
-        return
-    html = scraper.fetch_fundamental_selenium()
-    if not html:
-        print("❌ Failed to load fundamental.php data")
-        return
-    df = scraper.parse_fundamental_table(html)
-    print(f"✔ Table detected with {len(df)} rows")
-    try:
-        rows = json.loads(df.to_json(orient="records"))
-    except Exception:
-        rows = []
-    now_utc = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-    up = 0
-    for rec in rows:
-        d = rec.get("Date") or rec.get("col_1") or ""
-        if not d:
-            continue
-        rec["symbol"] = rec.get("symbol") or rec.get("stock_code") or rec.get("stock_name") or ""
-        rec["scraped_at_utc"] = now_utc
-        try:
-            MONGO_PRICES.update_one({"symbol": rec["symbol"], "Date": d}, {"$set": rec}, upsert=True)
-            up += 1
-        except Exception:
-            pass
-    print(f"✔ Fundamental disimpan ke MongoDB: upserted={up}")
+        return {"done": up, "total": 1}
+    return {"done": 0, "total": 0}
 
 
 if __name__ == "__main__":
-    main()
+    pass
