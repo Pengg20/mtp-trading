@@ -1,21 +1,18 @@
 name: Auto Scraper Saham
 
 on:
-  #schedule:
-    # Jadwal WIB dikurangi 7 jam (karena server UTC)
-    #- cron: '0 3 * * *'   # 10:00 WIB
-    #- cron: '0 5 * * *'   # 12:00 WIB
-    #- cron: '0 7 * * *'   # 14:00 WIB
-    #- cron: '30 8 * * *'  # 15:30 WIB
-    #- cron: '0 10 * * *'  # 17:00 WIB
-  
-  # Tombol Manual biar bisa dites sekarang
+  # Jadwal otomatis (uncomment saat sudah siap)
+  # schedule:
+  #   - cron: '0 3 * * *'    # 10:00 WIB
+  #   - cron: '0 5 * * *'    # 12:00 WIB
+  #   - cron: '0 7 * * *'    # 14:00 WIB
+  #   - cron: '30 8 * * *'   # 15:30 WIB
+  #   - cron: '0 10 * * *'   # 17:00 WIB
   workflow_dispatch:
 
 jobs:
   scrape-saham:
     runs-on: ubuntu-latest
-    
     steps:
       - name: Ambil Kode
         uses: actions/checkout@v3
@@ -29,18 +26,21 @@ jobs:
         uses: browser-actions/setup-chrome@latest
 
       - name: Install Library
-        run: pip install -r requirements.txt
+        run: pip install -r backend/requirements.txt
 
       - name: Jalankan Robot
         env:
-          # KUNCI RAHASIA WAJIB
           MONGO_URI: ${{ secrets.MONGO_URI }}
           SIGNALSAHAM_EMAIL: ${{ secrets.SIGNALSAHAM_EMAIL }}
-          SIGNALSAHAM_PASSWORD: ${{ secrets.SIGNALSAHAM_PASSWORD }} 
-          
-          # KONFIGURASI LINK (DIBUAT TINGGI UNTUK 934 LINK)
+          SIGNALSAHAM_PASSWORD: ${{ secrets.SIGNALSAHAM_PASSWORD }}
+          # Optional: ganti DB jika perlu
+          # MONGO_DB_NAME: saham_db
+
           HEADLESS_MODE: 'true'
+          LINKS_FILE: backend/link-name-stock.txt
           LINKS_LIMIT: '5'
-        
-        # Karena file scraper.py kamu ada di halaman depan (root)
-        run: python scraper.py
+          SKIP_EXISTING: 'false'   # untuk run awal isi DB
+          RATE_LIMIT_MS: '800'
+          REFRESH_RETRY: 'true'
+          UPDATE_MODE: 'append'
+        run: python backend/scraper.py
