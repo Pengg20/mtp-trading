@@ -57,6 +57,36 @@ class SignalSahamScraper:
             format="%(asctime)s %(levelname)s %(message)s",
         )
 
+    def _normalize_date_value(self, v: object) -> Optional[str]:
+        try:
+            s = str(v).strip()
+        except Exception:
+            return None
+        if not s:
+            return None
+        try:
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+                dt = datetime.strptime(s, "%Y-%m-%d")
+                return dt.strftime("%Y-%m-%d")
+            if re.match(r"^\d{2}-\d{2}-\d{4}$", s):
+                dt = datetime.strptime(s, "%d-%m-%Y")
+                return dt.strftime("%Y-%m-%d")
+            if re.match(r"^\d{2}/\d{2}/\d{4}$", s):
+                dt = datetime.strptime(s, "%d/%m/%Y")
+                return dt.strftime("%Y-%m-%d")
+            if re.match(r"^\d{2}\.\d{2}\.\d{4}$", s):
+                dt = datetime.strptime(s, "%d.%m.%Y")
+                return dt.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+        try:
+            dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
+            if pd.isna(dt):
+                return None
+            return dt.strftime("%Y-%m-%d")
+        except Exception:
+            return None
+
     def _get(self, url: str) -> requests.Response:
         return self.session.get(url, headers=self.headers, timeout=self.timeout, allow_redirects=True)
 
@@ -885,14 +915,16 @@ class SignalSahamScraper:
                 best = None
                 best_count = 0
                 for c in cols:
+                    cnt = 0
                     try:
-                        ser = pd.to_datetime(final_df[c], errors="coerce", dayfirst=True)
-                        cnt = int(ser.notna().sum())
-                        if cnt > best_count:
-                            best_count = cnt
-                            best = c
+                        for v in list(final_df[c])[:50]:
+                            if self._normalize_date_value(v):
+                                cnt += 1
                     except Exception:
-                        pass
+                        cnt = 0
+                    if cnt > best_count:
+                        best_count = cnt
+                        best = c
                 if best_count > 0:
                     date_col = best
         except Exception:
@@ -903,14 +935,8 @@ class SignalSahamScraper:
                 d_val = None
                 if isinstance(rec, dict):
                     d_val = rec.get("Date") or rec.get("Tanggal") or rec.get("tgl") or (rec.get(date_col) if date_col else None) or rec.get("col_1")
-                if not d_val:
-                    continue
-                try:
-                    dt = pd.to_datetime(d_val, errors="coerce", dayfirst=True)
-                    if pd.isna(dt):
-                        continue
-                    d = dt.strftime("%Y-%m-%d")
-                except Exception:
+                d = self._normalize_date_value(d_val)
+                if not d:
                     continue
                 rec["symbol"] = symbol
                 rec["scraped_at_utc"] = now_utc
