@@ -6,7 +6,7 @@ import logging
 from typing import List, Dict, Tuple, Optional
 from urllib.parse import urljoin, urlparse
 from io import StringIO
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import certifi
 from pymongo import MongoClient
@@ -867,7 +867,7 @@ class SignalSahamScraper:
             print(f"❌ {symbol} tidak ada data")
             return
         final_df = df.copy()
-        now_utc = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         try:
             records = json.loads(final_df.to_json(orient="records"))
         except Exception:
@@ -1046,7 +1046,7 @@ def run_scrape_job() -> Dict[str, int]:
             records = json.loads(out.to_json(orient="records"))
         except Exception:
             records = []
-        now_utc = datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         up = 0
         for rec in records:
             d = rec.get("Date") or rec.get("col_1") or ""
@@ -1064,4 +1064,4 @@ def run_scrape_job() -> Dict[str, int]:
 
 
 if __name__ == "__main__":
-    pass
+    run_scrape_job()

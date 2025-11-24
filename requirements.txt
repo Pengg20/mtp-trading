@@ -6,5 +6,3 @@ pymongo[srv]
 certifi
 lxml
 webdriver-manager
-Flask
-gunicorn
