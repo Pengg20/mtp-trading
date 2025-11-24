@@ -873,10 +873,28 @@ class SignalSahamScraper:
             records = json.loads(final_df.to_json(orient="records"))
         except Exception:
             records = []
+        date_col = None
+        try:
+            for c in list(final_df.columns):
+                s = str(c).lower().strip()
+                if ("date" in s) or ("tanggal" in s) or ("tgl" in s):
+                    date_col = c
+                    break
+            if date_col is None:
+                for c in list(final_df.columns):
+                    try:
+                        ser = pd.to_datetime(final_df[c], errors="coerce", dayfirst=True)
+                        if int(ser.notna().sum()) > 0:
+                            date_col = c
+                            break
+                    except Exception:
+                        pass
+        except Exception:
+            date_col = None
         inserted = 0
         for rec in records:
             try:
-                d = rec.get("Date") or rec.get("col_1") or ""
+                d = rec.get("Date") or rec.get("Tanggal") or rec.get("tgl") or rec.get("col_1") or (rec.get(date_col) if date_col else "")
                 if not d:
                     continue
                 rec["symbol"] = symbol
