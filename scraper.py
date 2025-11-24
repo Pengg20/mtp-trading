@@ -19,7 +19,8 @@ MONGO_URI = os.getenv("MONGO_URI")
 if not MONGO_URI:
     raise RuntimeError("MONGO_URI environment variable is required")
 MONGO_CLIENT = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
-MONGO_DB = MONGO_CLIENT["saham_db"]
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME") or "saham_db"
+MONGO_DB = MONGO_CLIENT[MONGO_DB_NAME]
 MONGO_PRICES = MONGO_DB["prices"]
 LOGIN_POST = "https://mtp.signalsaham.com/index.php"
 FUNDAMENTAL_URL = "https://mtp.signalsaham.com/fundamental.php"
@@ -882,7 +883,8 @@ class SignalSahamScraper:
                 rec["scraped_at_utc"] = now_utc
                 MONGO_PRICES.update_one({"symbol": symbol, "Date": d}, {"$set": rec}, upsert=True)
                 inserted += 1
-            except Exception:
+            except Exception as e:
+                print(f"❌ {symbol} upsert error: {e}")
                 continue
         print(f"✔ {symbol} → upserted={inserted}")
 
@@ -1008,6 +1010,12 @@ def run_scrape_job() -> Dict[str, int]:
     if not scraper.login(username, password):
         if not scraper.login_fixed(username, password):
             return {"done": 0, "total": 0}
+    try:
+        MONGO_CLIENT.admin.command("ping")
+        print("✔ Mongo connected")
+    except Exception as e:
+        print(f"❌ Mongo connect failed: {e}")
+        return {"done": 0, "total": 0}
     if not links_file:
         candidates = [os.path.join("backend", "link-name-stock.txt"), "link-name-stock.txt"]
         for cand in candidates:
